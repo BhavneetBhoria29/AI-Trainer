@@ -1,7 +1,7 @@
 streamlit==1.54.0
 pandas==2.2.3
 streamlit-webrtc==0.64.5
-mediapipe==0.10.14
+mediapipe==0.10.35
 gtts==2.5.3
 python-dotenv==1.2.2
 anthropic>=0.40.0
