@@ -1,6 +1,9 @@
 import streamlit as st
 import os
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
 import pandas as pd
 from services.auth.login_wall import render_login_wall
 from services.state.session_default import initial_session_default
