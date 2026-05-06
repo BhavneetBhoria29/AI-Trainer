@@ -1,0 +1,142 @@
+import math
+from core.base_exercise import BaseExercise
+
+
+class BenchPressDetector(BaseExercise):
+
+    def perform(self, landmarks):
+        return self.process(landmarks)
+
+
+
+
+    # Elbow fully extended at top, bent ~90° at bottom
+    UP_THRESHOLD = 160       # arms extended (top of press)
+    DOWN_THRESHOLD = 90      # arms bent at chest (bottom of press)
+    MIN_VISIBILITY = 0.7
+    SWING_THRESHOLD = 15     # degrees of torso movement considered swinging
+    FLARE_THRESHOLD = 0.08   # horizontal elbow flare from shoulder
+
+    LEFT_SHOULDER = 11
+    LEFT_ELBOW = 13
+    LEFT_WRIST = 15
+    RIGHT_SHOULDER = 12
+    RIGHT_ELBOW = 14
+    RIGHT_WRIST = 16
+    LEFT_HIP = 23
+    RIGHT_HIP = 24
+
+    def __init__(self):
+        super().__init__()
+        self._prev_hip_y = None
+
+    def reset(self):
+        self.reps = 0
+        self.stage = None
+        self._prev_hip_y = None
+
+    def process(self, landmarks) -> dict:
+
+        # ── Pick more visible side ────────────────────────────────────────────
+        left_vis = landmarks[self.LEFT_ELBOW].visibility
+        right_vis = landmarks[self.RIGHT_ELBOW].visibility
+
+        if left_vis >= right_vis:
+            shoulder_idx = self.LEFT_SHOULDER
+            elbow_idx    = self.LEFT_ELBOW
+            wrist_idx    = self.LEFT_WRIST
+            hip_idx      = self.LEFT_HIP
+        else:
+            shoulder_idx = self.RIGHT_SHOULDER
+            elbow_idx    = self.RIGHT_ELBOW
+            wrist_idx    = self.RIGHT_WRIST
+            hip_idx      = self.RIGHT_HIP
+
+        # ── Key angles ────────────────────────────────────────────────────────
+        elbow_angle = self.calculate_angle(
+            self.get_point(landmarks, shoulder_idx),
+            self.get_point(landmarks, elbow_idx),
+            self.get_point(landmarks, wrist_idx),
+        )
+
+        # ── Visibility gate ───────────────────────────────────────────────────
+        key_landmarks_visible = (
+            landmarks[shoulder_idx].visibility >= self.MIN_VISIBILITY
+            and landmarks[elbow_idx].visibility >= self.MIN_VISIBILITY
+            and landmarks[wrist_idx].visibility >= self.MIN_VISIBILITY
+        )
+
+        # ── Rep counting (down = bar at chest, up = arms extended) ────────────
+        # Bench press: starts extended → lowers to chest → presses back up
+        if key_landmarks_visible:
+            if elbow_angle <= self.DOWN_THRESHOLD and self.stage != "down":
+                self.stage = "down"
+            if elbow_angle >= self.UP_THRESHOLD and self.stage == "down":
+                self.stage = "up"
+                self.reps += 1
+
+        # ── Extension status ──────────────────────────────────────────────────
+        if elbow_angle >= self.UP_THRESHOLD:
+            extension_status = "FULLY EXTENDED ✅"
+        elif elbow_angle >= 130:
+            extension_status = "NEARLY EXTENDED"
+        elif elbow_angle >= self.DOWN_THRESHOLD:
+            extension_status = "LOWERING"
+        else:
+            extension_status = "CHEST LEVEL ✅"
+
+        # ── Shoulder status (elbow should not drop below shoulder plane) ──────
+        elbow_y  = landmarks[elbow_idx].y
+        shoulder_y = landmarks[shoulder_idx].y
+
+        if key_landmarks_visible:
+            if elbow_y > shoulder_y + 0.05:
+                shoulder_status = "ELBOW TOO LOW ❌"
+            elif elbow_y < shoulder_y - 0.05:
+                shoulder_status = "GOOD PATH ✅"
+            else:
+                shoulder_status = "ON PLANE ✅"
+        else:
+            shoulder_status = "N/A"
+
+        # ── Elbow flare (elbows should not flare excessively outward) ─────────
+        elbow_x    = landmarks[elbow_idx].x
+        shoulder_x = landmarks[shoulder_idx].x
+        flare      = abs(elbow_x - shoulder_x)
+
+        if key_landmarks_visible:
+            swing_status = "ELBOWS FLARING ⚠️" if flare > self.FLARE_THRESHOLD else "ELBOWS TUCKED ✅"
+        else:
+            swing_status = "N/A"
+
+        # ── Back arch status (hips should stay on bench — no excessive bridge) ─
+        left_hip_y  = landmarks[self.LEFT_HIP].y
+        right_hip_y = landmarks[self.RIGHT_HIP].y
+        avg_hip_y   = (left_hip_y + right_hip_y) / 2
+
+        hip_vis = (
+            landmarks[self.LEFT_HIP].visibility >= self.MIN_VISIBILITY
+            or landmarks[self.RIGHT_HIP].visibility >= self.MIN_VISIBILITY
+        )
+
+        if hip_vis and self._prev_hip_y is not None:
+            hip_movement = abs(avg_hip_y - self._prev_hip_y)
+            if hip_movement > 0.04:
+                back_arch_status = "EXCESSIVE ARCH ❌"
+            elif hip_movement > 0.02:
+                back_arch_status = "SLIGHT ARCH ⚠️"
+            else:
+                back_arch_status = "FLAT BACK ✅"
+        else:
+            back_arch_status = "N/A"
+
+        self._prev_hip_y = avg_hip_y if hip_vis else self._prev_hip_y
+
+        return {
+            "reps":             self.reps,
+            "elbow_angle":      int(elbow_angle),
+            "extension_status": extension_status,
+            "shoulder_status":  shoulder_status,
+            "swing_status":     swing_status,
+            "back_arch_status": back_arch_status,
+        }
